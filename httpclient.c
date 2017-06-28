@@ -17,14 +17,7 @@
 
 int get_request(char * url, char * port);
 int isValidIP(char * ip);
-int parseHeader(char * header);
-char * splitKeyValue(char * line, int index);
-void openFile();
 
-FILE * fileptr;
-char keys[][25] = {"Date: ", "Hostname: ", "Location: ", "Content-Type: "};
-char status[4] = {0, 0, 0, 0};
-char contentFileType[100];
 char path[1000];
 
 
@@ -121,6 +114,7 @@ int clnt_connect(char * url, char * port) {
 int clnt_send_request() {
     int ret;
     ret = write(sockfd, getrequest, strlen(getrequest));
+    debug(" sent %d of %d bytes\n", ret, strlen(getrequest));
     if (ret < strlen(getrequest)) {
         printf("ERR clnt_send_request %d\n", ret);
         return -1;
@@ -131,25 +125,22 @@ int clnt_send_request() {
 int clnt_recv_respose() {
     int ret;
     char * url, * temp;
-    char status_ok[] = "OK";
     char buffer[BUF_SIZE];
-    char http_not_found[] = "HTTP/1.0 404 Not Found";
-    char http_ok[] = "HTTP/1.0 200 OK";
-    char location[] = "Location: ";
-    char contentType[] = "Content-Type: ";
-    int sPos, ePos;
+    char http_ok[] = "HTTP/1.1 200 OK\r\n";
+    int buf_pos = 0;
 
     memset(&buffer, 0, sizeof(buffer));
     ret = recv(sockfd, buffer, BUF_SIZE, 0);
     if (ret < 0) {
         printf("Error receiving HTTP status!\n");
     } else {
+        buf_pos += ret;
         printf("%s\n", buffer);
-        if ((temp = strstr(buffer, http_ok)) != NULL) {
-            send(sockfd, status_ok, strlen(status_ok), 0);
-        } else {
+        if ((temp = strstr(buffer, http_ok)) == NULL) {
+            debug(" recv-1\n");
             close(sockfd);
-            return 0;
+            sockfd = -1;
+            return 1;
         }
     }
 
@@ -158,15 +149,16 @@ int clnt_recv_respose() {
     if (ret < 0) {
         printf("Error receiving HTTP header!\n");
     } else {
+        buf_pos += ret;
         printf("%s\n", buffer);
-        if (parseHeader(buffer) == 0) {
-            send(sockfd, status_ok, strlen(status_ok), 0);
-        } else {
-            printf("Error in HTTP header!\n");
+        if (0 /*parseHeader(buffer) != 0*/) {
+            debug(" recv-2\n");
             close(sockfd);
-            return 0;
+            sockfd = -1;
+            return 1;
         }
     }
+    return 0;
 }
 
 
@@ -177,13 +169,6 @@ int get_request(char * url, char * port) {
         printf("ERR clnt_connect %d\n", ret);
         return ret;
     }
-//printf("path=%s\n", path);
-//fileptr = fopen(path, "w");
-//strcpy(fileName, path);
-//sprintf(fileName, "%s", path);
-
-    //int optval = 1;
-    //setsockopt(sockfd, SOL_SOCKET, SO_REUSEADDR, &optval, sizeof optval);
 
 // writes the HTTP GET Request to the sockfd
     ret = clnt_send_request();
@@ -194,7 +179,7 @@ int get_request(char * url, char * port) {
 
     ret = clnt_recv_respose();
     if (ret) {
-        printf("ERR clnt_send_request %d\n", ret);
+        printf("ERR clnt_recv_respose %d\n", ret);
         return ret;
     }
 
@@ -207,62 +192,4 @@ int isValidIP(char * ip) {
     int valid = inet_pton(AF_INET, ip, &(addr.sin_addr));
     return valid != 0;
 }
-
-
-int parseHeader(char * header) {
-//"Date: %sHostname: %s:%d\nLocation: %s\nContent-Type: %s\n\n"
-    char * line, * key, * value;
-    char temp[100];
-    int i = 0;
-    line = strtok(header, "\n");
-    while (line != NULL) {
-        //printf("%s\n", line);
-        strcpy(temp, line);
-        value = splitKeyValue(line, i);
-        if (i == 3) {
-            strcpy(contentFileType, value);
-        }
-        //printf("value=%s\n", value);
-        line = strtok(NULL, "\n");
-        i++;
-    }
-    for (i = 0; i < 4; i++) {
-        if (status[i] == 0) return 1;
-        //printf("status[%d]=%d\n", i, status[i]);
-    }
-    return 0;
-}
-
-char * splitKeyValue(char * line, int index) {
-    char * temp;
-    if ((temp = strstr(line, keys[index])) != NULL) {
-        temp = temp + strlen(keys[index]);
-        status[index] = 1;
-    }
-    return temp;
-}
-
-void openFile() {
-    char * temp;
-    char command[100];
-    char fileName[1000];
-    strcpy(fileName, path);
-//printf("File Name: %s\n", fileName);
-//printf("Content Type: %s\n", contentFileType);
-    if ((temp = strstr(contentFileType, "text/html")) != NULL) {
-        if ((temp = strstr(fileName, ".txt")) != NULL) {
-            sprintf(command, "gedit %s", fileName);
-        } else {
-            sprintf(command, "firefox %s", fileName);
-        }
-        system(command);
-    } else if ((temp = strstr(contentFileType, "application/pdf")) != NULL) {
-        sprintf(command, "acroread %s", fileName);
-        system(command);
-    } else {
-        printf("The filetype %s is not supported. Failed to open %s!\n", contentFileType, fileName);
-    }
-}
-
-
 
