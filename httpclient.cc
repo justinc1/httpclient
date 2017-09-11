@@ -15,6 +15,7 @@
 #include <errno.h>
 #include <assert.h>
 #include <time.h>
+#include <sys/epoll.h>
 
 #define BUF_SIZE 1024
 
@@ -26,6 +27,15 @@ int sockfd = -1;
 char getrequest[1024];
 int num_requests;
 char path[1000];
+
+bool use_epoll = true;
+#define EPOLL_QUEUE_LEN 10
+#define MAX_EPOLL_EVENTS_PER_RUN 10
+struct epoll_event events[MAX_EPOLL_EVENTS_PER_RUN];
+// timeout in ms
+#define EPOLL_RUN_TIMEOUT (1000*10)
+int epfd = -1;
+struct epoll_event ev;
 
 struct timespec ts_start, ts_stop;
 
@@ -133,6 +143,20 @@ int clnt_connect(char * url, char * port) {
     ptr = strtok(path, "/");
     strcpy(path, ptr);
 
+    if (use_epoll) {
+        epfd = epoll_create(EPOLL_QUEUE_LEN);
+        if (epfd == -1) {
+            printf("epoll_create Error!\n");
+            exit(1);
+        }
+        ev.events = EPOLLIN | EPOLLPRI | EPOLLERR | EPOLLHUP;
+        ev.data.fd = sockfd;
+        if (0 != (ret = epoll_ctl(epfd, EPOLL_CTL_ADD, sockfd, &ev))) {
+            printf("epoll_ctl EPOLL_CTL_ADD Error!\n");
+            exit(1);
+        }
+    }
+
     return 0;
 }
 
@@ -161,6 +185,22 @@ int clnt_recv_respose() {
 
     memset(&buffer, 0, sizeof(buffer));
     while(response_done == false) {
+
+        if (use_epoll) {
+            int nfds = epoll_wait(epfd, events,
+                                        MAX_EPOLL_EVENTS_PER_RUN,
+                                        EPOLL_RUN_TIMEOUT);
+            if (nfds < 0) {
+                printf("Error in epoll_wait!");
+                exit(1);
+            }
+            // for each ready socket
+            for(int ii = 0; ii < nfds; ii++) {
+                int fd = events[ii].data.fd;
+                // TODO - recv and parse. But we have single conn only.
+            }
+        }
+
         ret = recv(sockfd, buffer, BUF_SIZE, 0);
         //debug(" INFO recv ret=%d, errno=%d\n", ret, errno); sleep(1);
         if (ret < 0) {
