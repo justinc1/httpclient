@@ -14,14 +14,32 @@
 #include <arpa/inet.h>
 #include <errno.h>
 #include <assert.h>
+#include <time.h>
 
 #define BUF_SIZE 1024
 
 int main_loop(char * url, char * port);
 int isValidIP(char * ip);
 
+
+int sockfd = -1;
+char getrequest[1024];
+int num_requests;
 char path[1000];
 
+struct timespec ts_start, ts_stop;
+
+void timer_start()
+{
+    clock_gettime(CLOCK_REALTIME, &ts_start);
+}
+
+double timer_get_us()
+{
+    clock_gettime(CLOCK_REALTIME, &ts_stop);
+    double result = (ts_stop.tv_sec - ts_start.tv_sec) * 1e6 + (ts_stop.tv_nsec - ts_start.tv_nsec) / 1e3;
+    return result;
+}
 
 /*extern "C"*/ pid_t gettid() __attribute((weak));
 pid_t my_gettid() {
@@ -42,12 +60,20 @@ int main(int argc, char**argv) {
     int portNumber;
 
     if (argc < 3) {
-        printf("usage: [URL] [port number]\n");
+        printf("Usage: [URL] [port number] [num_requests]\n");
+        printf("Example: %s http://192.168.122.90/index_html 80 5\n");
         exit(1);
     }
 
+    num_requests = 10000;
     url = argv[1];
     portNumber = atoi(argv[2]);
+    switch (argc) {
+        case 4:
+            num_requests = atoi(argv[3]);
+        default:
+            break;
+    }
 
 //checking the protocol specified
     if ((temp = strstr(url, "http://")) != NULL) {
@@ -66,9 +92,6 @@ int main(int argc, char**argv) {
 
     return 0;
 }
-
-int sockfd = -1;
-char getrequest[1024];
 
 int clnt_connect(char * url, char * port) {
     char * ptr, * host;
@@ -197,6 +220,10 @@ int clnt_recv_respose() {
 
 int main_loop(char * url, char * port) {
     int ret;
+    double duration;
+
+    timer_start();
+
     ret = clnt_connect(url, port);
     if (ret) {
         printf("ERR clnt_connect %d\n", ret);
@@ -204,9 +231,8 @@ int main_loop(char * url, char * port) {
     }
 
 // writes the HTTP GET Request to the sockfd
-    int nreq, ii;
-    nreq = 10;
-    for (ii=0; ii<nreq; ii++) {
+    int ii;
+    for (ii=0; ii<num_requests; ii++) {
         ret = clnt_send_request();
         if (ret) {
             printf("ERR clnt_send_request %d\n", ret);
@@ -219,6 +245,9 @@ int main_loop(char * url, char * port) {
             return ret;
         }
     }
+
+    duration = timer_get_us();
+    printf(" RATE % 6.0f req/s,  DURATION % 4.3f s, NUM_REQUEST % 7d\n", num_requests*1e6/duration, duration/1e6, num_requests);
 
     close(sockfd);
     sockfd = -1;
